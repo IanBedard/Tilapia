@@ -6,6 +6,27 @@ export type User = {
   email: string;
   role: Role;
   githubConnected: boolean;
+  status: "active" | "suspended";
+  joinedAt: string;
+};
+
+export type Comment = {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+};
+
+export type PinPhoto = {
+  id: string;
+  src: string;
+  caption: string;
+};
+
+export type Rating = {
+  id: string;
+  userEmail: string;
+  value: number;
 };
 
 export type FishingPin = {
@@ -19,4 +40,7 @@ export type FishingPin = {
   x: number;
   y: number;
   createdBy: string;
+  ratings: Rating[];
+  comments: Comment[];
+  photos: PinPhoto[];
 };

@@ -181,7 +181,7 @@ textarea {
   padding: 9px 12px;
 }
 
-.dashboard-grid,
+.map-workspace,
 .admin-grid {
   display: grid;
   gap: 18px;
@@ -189,12 +189,14 @@ textarea {
   max-width: 1320px;
 }
 
-.dashboard-grid {
+.map-workspace {
+  align-items: start;
   grid-template-columns: minmax(0, 1fr) 390px;
+  position: relative;
 }
 
 .map-section,
-.side-panel > *,
+.right-tools > *,
 .admin-grid > * {
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid #d4e3dc;
@@ -218,6 +220,10 @@ textarea {
   font-weight: 800;
 }
 
+.full-map {
+  min-width: 0;
+}
+
 .ncr-map {
   aspect-ratio: 16 / 10;
   background:
@@ -226,6 +232,22 @@ textarea {
   min-height: 500px;
   overflow: hidden;
   position: relative;
+}
+
+.movable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.movable:active {
+  cursor: grabbing;
+}
+
+.map-canvas {
+  height: 100%;
+  position: absolute;
+  transition: transform 160ms ease;
+  width: 100%;
 }
 
 .river {
@@ -279,7 +301,7 @@ textarea {
 }
 
 .map-pin span {
-  background: #e2513f;
+  background: var(--pin-color, #e2513f);
   border: 3px solid #fff;
   border-radius: 50% 50% 50% 0;
   box-shadow: 0 8px 18px rgba(104, 30, 22, 0.28);
@@ -290,11 +312,23 @@ textarea {
 }
 
 .map-pin.selected span {
-  background: #153f34;
   transform: rotate(-45deg) scale(1.18);
 }
 
-.side-panel {
+.draft-pin {
+  background: #153f34;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 5px 8px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+}
+
+.right-tools {
   display: grid;
   gap: 18px;
 }
@@ -304,8 +338,153 @@ textarea {
 .city-list,
 .github-card,
 .table-card,
-.admin-hero {
+.admin-hero,
+.spot-drawer {
   padding: 18px;
+}
+
+.spot-drawer {
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid #d4e3dc;
+  border-radius: 8px;
+  bottom: 22px;
+  box-shadow: 0 24px 70px rgba(18, 48, 39, 0.22);
+  left: max(22px, calc((100vw - 1320px) / 2 + 22px));
+  max-width: 380px;
+  opacity: 0;
+  overflow: auto;
+  position: fixed;
+  top: 112px;
+  transform: translateX(-32px);
+  transition: opacity 220ms ease, transform 220ms ease;
+  visibility: hidden;
+  width: calc(100vw - 44px);
+  z-index: 10;
+}
+
+.spot-drawer.open {
+  opacity: 1;
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.drawer-close {
+  background: #eef8f2;
+  border: 1px solid #bdd5ca;
+  border-radius: 999px;
+  color: #183028;
+  float: right;
+  font-weight: 800;
+  padding: 7px 10px;
+}
+
+.rating-summary {
+  align-items: center;
+  background: #eef8f2;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px;
+}
+
+.rating-summary strong {
+  color: #135c49;
+  font-size: 2rem;
+}
+
+.rating-summary span {
+  color: #587267;
+  font-weight: 800;
+}
+
+.gallery,
+.comments-list,
+.compact-form {
+  border-top: 1px solid #e2ece7;
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.gallery h3,
+.comments-list h3 {
+  margin: 0;
+}
+
+.photo-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.photo-grid figure {
+  margin: 0;
+}
+
+.photo-grid img,
+.upload-strip img {
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  object-fit: cover;
+  width: 100%;
+}
+
+.photo-grid figcaption {
+  color: #60766d;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.compact-form {
+  gap: 10px;
+}
+
+.comment-card {
+  background: #f6faf7;
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.comment-card p {
+  margin: 0;
+}
+
+.comment-card time {
+  margin: 0;
+}
+
+.empty-note,
+.hint {
+  color: #60766d;
+  margin: 0;
+}
+
+.rating-key {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.key {
+  border-radius: 999px;
+  display: inline-block;
+  height: 12px;
+  width: 12px;
+}
+
+.key.red { background: hsl(0 78% 43%); }
+.key.yellow { background: hsl(60 78% 43%); }
+.key.green { background: hsl(120 78% 43%); }
+
+.upload-strip {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .fish-list {
@@ -351,7 +530,7 @@ time {
 .stat-row {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   margin-top: 20px;
 }
 
@@ -392,10 +571,29 @@ time {
   gap: 4px;
 }
 
+.row-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 @media (max-width: 980px) {
-  .dashboard-grid,
+  .map-workspace,
   .admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .spot-drawer {
+    bottom: auto;
+    left: 14px;
+    max-width: none;
+    right: 14px;
+    top: 96px;
   }
 
   .topbar {

@@ -1,19 +1,44 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, MouseEvent, PointerEvent, useMemo, useRef, useState } from "react";
 import { demoAdmin, signIn } from "./auth";
-import { loadPins, loadSession, savePins, saveSession } from "./storage";
-import type { FishingPin, User } from "./types";
+import { loadPins, loadSession, loadUsers, savePins, saveSession, saveUsers } from "./storage";
+import type { Comment, FishingPin, PinPhoto, Rating, User } from "./types";
 
 const ncrCities = ["Ottawa", "Gatineau", "Orleans", "Kanata", "Nepean", "Chelsea", "Aylmer"];
 
+function getAverageRating(pin: FishingPin) {
+  if (!pin.ratings.length) return 0;
+  return pin.ratings.reduce((sum, rating) => sum + rating.value, 0) / pin.ratings.length;
+}
+
+function getRatingColor(value: number) {
+  const clamped = Math.max(0, Math.min(5, value));
+  const hue = Math.round((clamped / 5) * 120);
+  return `hsl(${hue} 78% 43%)`;
+}
+
 function App() {
   const [user, setUser] = useState<User | null>(() => loadSession());
+  const [users, setUsers] = useState<User[]>(() => loadUsers());
   const [pins, setPins] = useState<FishingPin[]>(() => loadPins());
   const [selectedPinId, setSelectedPinId] = useState<string | null>(pins[0]?.id ?? null);
+  const [draftLocation, setDraftLocation] = useState<{ x: number; y: number } | null>(null);
   const [view, setView] = useState<"map" | "admin">("map");
+
+  function persistPins(nextPins: FishingPin[]) {
+    setPins(nextPins);
+    savePins(nextPins);
+  }
+
+  function persistUsers(nextUsers: User[]) {
+    setUsers(nextUsers);
+    saveUsers(nextUsers);
+  }
 
   function handleLogin(nextUser: User) {
     setUser(nextUser);
     saveSession(nextUser);
+    const existing = users.some((item) => item.email === nextUser.email);
+    if (!existing) persistUsers([nextUser, ...users]);
   }
 
   function handleLogout() {
@@ -24,15 +49,18 @@ function App() {
 
   function handleAddPin(pin: FishingPin) {
     const nextPins = [pin, ...pins];
-    setPins(nextPins);
-    savePins(nextPins);
+    persistPins(nextPins);
     setSelectedPinId(pin.id);
+    setDraftLocation(null);
+  }
+
+  function handleUpdatePin(updatedPin: FishingPin) {
+    persistPins(pins.map((pin) => (pin.id === updatedPin.id ? updatedPin : pin)));
   }
 
   function handleDeletePin(id: string) {
     const nextPins = pins.filter((pin) => pin.id !== id);
-    setPins(nextPins);
-    savePins(nextPins);
+    persistPins(nextPins);
     setSelectedPinId(nextPins[0]?.id ?? null);
   }
 
@@ -48,13 +76,9 @@ function App() {
           <h1>Tilapia Spots</h1>
         </div>
         <nav className="nav-actions" aria-label="Primary">
-          <button className={view === "map" ? "active" : ""} onClick={() => setView("map")}>
-            Map
-          </button>
+          <button className={view === "map" ? "active" : ""} onClick={() => setView("map")}>Map</button>
           {user.role === "admin" && (
-            <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>
-              Admin
-            </button>
+            <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>Admin</button>
           )}
           <span className="user-pill">{user.role === "admin" ? "Admin" : "User"}: {user.name}</span>
           <button onClick={handleLogout}>Log out</button>
@@ -62,14 +86,24 @@ function App() {
       </header>
 
       {view === "admin" && user.role === "admin" ? (
-        <AdminPanel pins={pins} user={user} onDeletePin={handleDeletePin} onUserChange={handleLogin} />
+        <AdminPanel
+          pins={pins}
+          users={users}
+          currentUser={user}
+          onDeletePin={handleDeletePin}
+          onUserChange={handleLogin}
+          onUsersChange={persistUsers}
+        />
       ) : (
         <MapDashboard
+          draftLocation={draftLocation}
           pins={pins}
           selectedPinId={selectedPinId}
           user={user}
           onAddPin={handleAddPin}
+          onDraftLocation={setDraftLocation}
           onSelectPin={setSelectedPinId}
+          onUpdatePin={handleUpdatePin}
         />
       )}
     </div>
@@ -94,7 +128,7 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
     <main className="login-page">
       <section className="login-panel">
         <p className="eyebrow">Private NCR fishing log</p>
-        <h1>Sign in to map fishing spots</h1>
+        <h1>Sign in to explore the NCR map</h1>
         <form onSubmit={submit} className="auth-form">
           <label>
             Email
@@ -117,19 +151,29 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
 }
 
 function MapDashboard({
+  draftLocation,
   pins,
   selectedPinId,
   user,
   onAddPin,
+  onDraftLocation,
   onSelectPin,
+  onUpdatePin,
 }: {
+  draftLocation: { x: number; y: number } | null;
   pins: FishingPin[];
   selectedPinId: string | null;
   user: User;
   onAddPin: (pin: FishingPin) => void;
+  onDraftLocation: (location: { x: number; y: number } | null) => void;
   onSelectPin: (id: string) => void;
+  onUpdatePin: (pin: FishingPin) => void;
 }) {
-  const selectedPin = pins.find((pin) => pin.id === selectedPinId) ?? pins[0];
+  const selectedPin = pins.find((pin) => pin.id === selectedPinId) ?? null;
+  const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
+  const movedRef = useRef(false);
+
   const cityCounts = useMemo(() => {
     return ncrCities.map((city) => ({
       city,
@@ -137,48 +181,93 @@ function MapDashboard({
     }));
   }, [pins]);
 
+  function startDrag(event: PointerEvent<HTMLDivElement>) {
+    dragRef.current = { x: event.clientX, y: event.clientY, originX: mapOffset.x, originY: mapOffset.y };
+    movedRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveMap(event: PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return;
+    const dx = event.clientX - dragRef.current.x;
+    const dy = event.clientY - dragRef.current.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true;
+    setMapOffset({
+      x: Math.max(-160, Math.min(160, dragRef.current.originX + dx)),
+      y: Math.max(-110, Math.min(110, dragRef.current.originY + dy)),
+    });
+  }
+
+  function stopDrag() {
+    dragRef.current = null;
+  }
+
+  function dropDraftPin(event: MouseEvent<HTMLDivElement>) {
+    if (movedRef.current) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button")) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left - mapOffset.x) / rect.width) * 100;
+    const y = ((event.clientY - rect.top - mapOffset.y) / rect.height) * 100;
+    onDraftLocation({ x: Math.max(4, Math.min(96, x)), y: Math.max(8, Math.min(92, y)) });
+  }
+
   return (
-    <main className="dashboard-grid">
-      <section className="map-section" aria-label="NCR fishing map">
+    <main className={`map-workspace ${selectedPin ? "panel-open" : ""}`}>
+      <SpotDrawer pin={selectedPin} user={user} onClose={() => onSelectPin("")} onUpdatePin={onUpdatePin} />
+
+      <section className="map-section full-map" aria-label="NCR fishing map">
         <div className="map-toolbar">
           <div>
             <p className="eyebrow">National Capital Region</p>
-            <h2>Fishing zones map</h2>
+            <h2>Drag the map, click to place a pin</h2>
           </div>
-          <span>{pins.length} saved spots</span>
+          <div className="rating-key">
+            <span className="key red" /> 0
+            <span className="key yellow" /> 2.5
+            <span className="key green" /> 5
+          </div>
         </div>
-        <div className="ncr-map">
-          <div className="river river-ottawa" />
-          <div className="river river-rideau" />
-          <span className="map-label ottawa">Ottawa</span>
-          <span className="map-label gatineau">Gatineau</span>
-          <span className="map-label kanata">Kanata</span>
-          <span className="map-label orleans">Orleans</span>
-          {pins.map((pin) => (
-            <button
-              key={pin.id}
-              className={`map-pin ${pin.id === selectedPin?.id ? "selected" : ""}`}
-              style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
-              onClick={() => onSelectPin(pin.id)}
-              title={`${pin.spotName}: ${pin.fishCaught}`}
-            >
-              <span />
-            </button>
-          ))}
+        <div
+          className="ncr-map movable"
+          onClick={dropDraftPin}
+          onPointerDown={startDrag}
+          onPointerMove={moveMap}
+          onPointerUp={stopDrag}
+          onPointerCancel={stopDrag}
+        >
+          <div className="map-canvas" style={{ transform: `translate(${mapOffset.x}px, ${mapOffset.y}px)` }}>
+            <div className="river river-ottawa" />
+            <div className="river river-rideau" />
+            <span className="map-label ottawa">Ottawa</span>
+            <span className="map-label gatineau">Gatineau</span>
+            <span className="map-label kanata">Kanata</span>
+            <span className="map-label orleans">Orleans</span>
+            {pins.map((pin) => {
+              const average = getAverageRating(pin);
+              return (
+                <button
+                  key={pin.id}
+                  className={`map-pin ${pin.id === selectedPin?.id ? "selected" : ""}`}
+                  style={{ left: `${pin.x}%`, top: `${pin.y}%`, ["--pin-color" as string]: getRatingColor(average) }}
+                  onClick={() => onSelectPin(pin.id)}
+                  title={`${pin.spotName}: ${average.toFixed(1)} stars`}
+                >
+                  <span />
+                </button>
+              );
+            })}
+            {draftLocation && (
+              <div className="draft-pin" style={{ left: `${draftLocation.x}%`, top: `${draftLocation.y}%` }}>
+                New
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
-      <aside className="side-panel">
-        {selectedPin && (
-          <article className="spot-card">
-            <p className="eyebrow">{selectedPin.city} - {selectedPin.waterbody}</p>
-            <h2>{selectedPin.spotName}</h2>
-            <p className="fish-list">{selectedPin.fishCaught}</p>
-            <p>{selectedPin.notes}</p>
-            <time dateTime={selectedPin.caughtAt}>Caught on {selectedPin.caughtAt}</time>
-          </article>
-        )}
-        <PinForm user={user} onAddPin={onAddPin} />
+      <aside className="right-tools">
+        <PinForm draftLocation={draftLocation} user={user} onAddPin={onAddPin} />
         <section className="city-list">
           <h2>Coverage</h2>
           {cityCounts.map((item) => (
@@ -193,13 +282,122 @@ function MapDashboard({
   );
 }
 
-function PinForm({ user, onAddPin }: { user: User; onAddPin: (pin: FishingPin) => void }) {
+function SpotDrawer({
+  pin,
+  user,
+  onClose,
+  onUpdatePin,
+}: {
+  pin: FishingPin | null;
+  user: User;
+  onClose: () => void;
+  onUpdatePin: (pin: FishingPin) => void;
+}) {
+  const [comment, setComment] = useState("");
+  const [rating, setRating] = useState(5);
+  const average = pin ? getAverageRating(pin) : 0;
+
+  function submitComment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pin || !comment.trim()) return;
+    const nextComment: Comment = {
+      id: crypto.randomUUID(),
+      author: user.email,
+      body: comment.trim(),
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+    onUpdatePin({ ...pin, comments: [nextComment, ...pin.comments] });
+    setComment("");
+  }
+
+  function submitRating(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!pin) return;
+    const nextRatings = pin.ratings.filter((item) => item.userEmail !== user.email);
+    const nextRating: Rating = { id: crypto.randomUUID(), userEmail: user.email, value: Number(rating) };
+    onUpdatePin({ ...pin, ratings: [nextRating, ...nextRatings] });
+  }
+
+  return (
+    <aside className={`spot-drawer ${pin ? "open" : ""}`} aria-hidden={!pin}>
+      {pin && (
+        <>
+          <button className="drawer-close" onClick={onClose}>Close</button>
+          <p className="eyebrow">{pin.city} - {pin.waterbody}</p>
+          <h2>{pin.spotName}</h2>
+          <div className="rating-summary">
+            <strong>{average.toFixed(1)}</strong>
+            <span>average rating from {pin.ratings.length} vote{pin.ratings.length === 1 ? "" : "s"}</span>
+          </div>
+          <p className="fish-list">{pin.fishCaught}</p>
+          <p>{pin.notes || "No notes yet."}</p>
+          <time dateTime={pin.caughtAt}>Observed on {pin.caughtAt}</time>
+
+          <section className="gallery">
+            <h3>Image gallery</h3>
+            {pin.photos.length ? (
+              <div className="photo-grid">
+                {pin.photos.map((photo) => (
+                  <figure key={photo.id}>
+                    <img src={photo.src} alt={photo.caption || pin.spotName} />
+                    <figcaption>{photo.caption}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-note">No pictures yet.</p>
+            )}
+          </section>
+
+          <form className="compact-form" onSubmit={submitRating}>
+            <label>
+              Your rating
+              <input min="0" max="5" step="1" type="range" value={rating} onChange={(event) => setRating(Number(event.target.value))} />
+            </label>
+            <button className="primary-button" type="submit">Rate {rating}/5</button>
+          </form>
+
+          <form className="compact-form" onSubmit={submitComment}>
+            <label>
+              Add comment
+              <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Share access notes, fish activity, bait, or conditions..." />
+            </label>
+            <button className="primary-button" type="submit">Post comment</button>
+          </form>
+
+          <section className="comments-list">
+            <h3>Comments</h3>
+            {pin.comments.length ? pin.comments.map((item) => (
+              <article key={item.id} className="comment-card">
+                <strong>{item.author}</strong>
+                <p>{item.body}</p>
+                <time dateTime={item.createdAt}>{item.createdAt}</time>
+              </article>
+            )) : <p className="empty-note">No comments yet.</p>}
+          </section>
+        </>
+      )}
+    </aside>
+  );
+}
+
+function PinForm({
+  draftLocation,
+  user,
+  onAddPin,
+}: {
+  draftLocation: { x: number; y: number } | null;
+  user: User;
+  onAddPin: (pin: FishingPin) => void;
+}) {
   const [spotName, setSpotName] = useState("");
   const [waterbody, setWaterbody] = useState("");
   const [city, setCity] = useState(ncrCities[0]);
   const [fishCaught, setFishCaught] = useState("");
   const [notes, setNotes] = useState("");
   const [caughtAt, setCaughtAt] = useState(new Date().toISOString().slice(0, 10));
+  const [rating, setRating] = useState(5);
+  const [photos, setPhotos] = useState<PinPhoto[]>([]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -213,20 +411,39 @@ function PinForm({ user, onAddPin }: { user: User; onAddPin: (pin: FishingPin) =
       fishCaught,
       notes,
       caughtAt,
-      x: 18 + Math.random() * 64,
-      y: 22 + Math.random() * 54,
+      x: draftLocation?.x ?? 50,
+      y: draftLocation?.y ?? 50,
       createdBy: user.email,
+      ratings: [{ id: crypto.randomUUID(), userEmail: user.email, value: Number(rating) }],
+      comments: notes ? [{ id: crypto.randomUUID(), author: user.email, body: notes, createdAt: caughtAt }] : [],
+      photos,
     });
 
     setSpotName("");
     setWaterbody("");
     setFishCaught("");
     setNotes("");
+    setPhotos([]);
+  }
+
+  function addPhotos(files: FileList | null) {
+    if (!files) return;
+    Array.from(files).slice(0, 4).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setPhotos((current) => [
+          ...current,
+          { id: crypto.randomUUID(), src: String(reader.result), caption: file.name },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   return (
     <form className="pin-form" onSubmit={submit}>
-      <h2>Add fishing zone</h2>
+      <h2>Add observed zone</h2>
+      <p className="hint">{draftLocation ? "Using the pin location you selected on the map." : "Click the map to choose a location, or save at map center."}</p>
       <label>
         Spot name
         <input value={spotName} onChange={(event) => setSpotName(event.target.value)} placeholder="Example: Shirley's Bay" />
@@ -252,64 +469,120 @@ function PinForm({ user, onAddPin }: { user: User; onAddPin: (pin: FishingPin) =
         <input value={fishCaught} onChange={(event) => setFishCaught(event.target.value)} placeholder="Bass, pike, walleye..." />
       </label>
       <label>
-        Notes
+        Rating: {rating}/5
+        <input min="0" max="5" step="1" type="range" value={rating} onChange={(event) => setRating(Number(event.target.value))} />
+      </label>
+      <label>
+        Picture
+        <input accept="image/*" multiple type="file" onChange={(event) => addPhotos(event.target.files)} />
+      </label>
+      {photos.length > 0 && <div className="upload-strip">{photos.map((photo) => <img key={photo.id} src={photo.src} alt={photo.caption} />)}</div>}
+      <label>
+        Comment / notes
         <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Access, bait, weather, conditions..." />
       </label>
-      <button type="submit" className="primary-button">Drop pin</button>
+      <button type="submit" className="primary-button">Drop observation pin</button>
     </form>
   );
 }
 
 function AdminPanel({
+  currentUser,
   pins,
-  user,
+  users,
   onDeletePin,
   onUserChange,
+  onUsersChange,
 }: {
+  currentUser: User;
   pins: FishingPin[];
-  user: User;
+  users: User[];
   onDeletePin: (id: string) => void;
   onUserChange: (user: User) => void;
+  onUsersChange: (users: User[]) => void;
 }) {
   const [githubOwner, setGithubOwner] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
-  const [githubStatus, setGithubStatus] = useState(user.githubConnected ? "Connected" : "Not connected");
+  const [githubStatus, setGithubStatus] = useState(currentUser.githubConnected ? "Connected" : "Not connected");
 
   function connectGithub() {
-    const nextUser = { ...user, githubConnected: true };
+    const nextUser = { ...currentUser, githubConnected: true };
     setGithubStatus(githubOwner && githubRepo ? `Connected to ${githubOwner}/${githubRepo}` : "Connected locally");
     onUserChange(nextUser);
+    onUsersChange(users.map((user) => (user.email === nextUser.email ? nextUser : user)));
+  }
+
+  function toggleStatus(target: User) {
+    if (target.email === currentUser.email) return;
+    onUsersChange(users.map((user) => (
+      user.email === target.email ? { ...user, status: user.status === "active" ? "suspended" : "active" } : user
+    )));
+  }
+
+  function toggleRole(target: User) {
+    if (target.email === currentUser.email) return;
+    onUsersChange(users.map((user) => (
+      user.email === target.email ? { ...user, role: user.role === "admin" ? "user" : "admin" } : user
+    )));
+  }
+
+  function removeUser(target: User) {
+    if (target.email === currentUser.email) return;
+    onUsersChange(users.filter((user) => user.email !== target.email));
   }
 
   const latest = [...pins].sort((a, b) => b.caughtAt.localeCompare(a.caughtAt))[0];
+  const averageRating = pins.length ? pins.reduce((sum, pin) => sum + getAverageRating(pin), 0) / pins.length : 0;
 
   return (
     <main className="admin-grid">
       <section className="admin-hero">
-        <p className="eyebrow">Admin panel</p>
-        <h2>Manage NCR fishing reports</h2>
+        <p className="eyebrow">Admin dashboard</p>
+        <h2>Manage NCR fishing reports and users</h2>
         <div className="stat-row">
           <div><strong>{pins.length}</strong><span>Total pins</span></div>
-          <div><strong>{new Set(pins.map((pin) => pin.createdBy)).size}</strong><span>Contributors</span></div>
+          <div><strong>{users.length}</strong><span>Users</span></div>
+          <div><strong>{averageRating.toFixed(1)}</strong><span>Average spot rating</span></div>
           <div><strong>{latest?.caughtAt ?? "None"}</strong><span>Latest catch</span></div>
         </div>
       </section>
 
       <section className="github-card">
         <h2>GitHub connection</h2>
-        <p>Use this starter panel to wire a GitHub repo for issues, exports, or OAuth later.</p>
+        <p>Use this panel to wire exports, issues, or OAuth in the next backend pass.</p>
         <div className="form-pair">
           <label>
             Owner
-            <input value={githubOwner} onChange={(event) => setGithubOwner(event.target.value)} placeholder="github-org" />
+            <input value={githubOwner} onChange={(event) => setGithubOwner(event.target.value)} placeholder="IanBedard" />
           </label>
           <label>
             Repo
-            <input value={githubRepo} onChange={(event) => setGithubRepo(event.target.value)} placeholder="fishing-spots" />
+            <input value={githubRepo} onChange={(event) => setGithubRepo(event.target.value)} placeholder="Tilapia" />
           </label>
         </div>
         <button className="primary-button" onClick={connectGithub}>Connect GitHub</button>
         <span className="status-line">{githubStatus}</span>
+      </section>
+
+      <section className="table-card">
+        <h2>Manage users</h2>
+        <div className="reports-list">
+          {users.map((item) => (
+            <article key={item.email} className="report-row user-row">
+              <div>
+                <strong>{item.name}</strong>
+                <span>{item.email} - {item.role} - {item.status}</span>
+              </div>
+              <div className="row-actions">
+                <button disabled={item.email === currentUser.email} onClick={() => toggleRole(item)}>Role</button>
+                <button disabled={item.email === currentUser.email} onClick={() => toggleStatus(item)}>
+                  {item.status === "active" ? "Suspend" : "Activate"}
+                </button>
+                <button disabled={item.email === currentUser.email} onClick={() => removeUser(item)}>Delete</button>
+              </div>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="table-card">
@@ -319,7 +592,7 @@ function AdminPanel({
             <article key={pin.id} className="report-row">
               <div>
                 <strong>{pin.spotName}</strong>
-                <span>{pin.city} - {pin.fishCaught} - {pin.createdBy}</span>
+                <span>{pin.city} - {getAverageRating(pin).toFixed(1)}/5 - {pin.createdBy}</span>
               </div>
               <button onClick={() => onDeletePin(pin.id)}>Delete</button>
             </article>
