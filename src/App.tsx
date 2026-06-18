@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { Map, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { demoAdmin, signIn } from "./auth";
+import { deleteRemotePin, deleteRemoteUser, loadAppData, saveRemotePins, saveRemoteUsers } from "./database";
 import { loadPins, loadSession, loadUsers, savePins, saveSession, saveUsers } from "./storage";
+import { isSupabaseConfigured } from "./supabaseClient";
 import type { Comment, FishingPin, PinPhoto, Rating, User } from "./types";
 
 const ncrCities = ["Ottawa", "Gatineau", "Orleans", "Kanata", "Nepean", "Chelsea", "Aylmer"];
@@ -28,15 +30,43 @@ function App() {
   const [selectedPinId, setSelectedPinId] = useState<string | null>(pins[0]?.id ?? null);
   const [draftLocation, setDraftLocation] = useState<DraftLocation | null>(null);
   const [view, setView] = useState<"map" | "admin">("map");
+  const [databaseStatus, setDatabaseStatus] = useState(isSupabaseConfigured ? "Connecting to Supabase..." : "Local cache");
+
+  useEffect(() => {
+    let cancelled = false;
+    loadAppData()
+      .then(({ pins: nextPins, users: nextUsers, source }) => {
+        if (cancelled) return;
+        setPins(nextPins);
+        setUsers(nextUsers);
+        setSelectedPinId((current) => current ?? nextPins[0]?.id ?? null);
+        setDatabaseStatus(source === "supabase" ? "Supabase connected" : "Local cache");
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) setDatabaseStatus("Local cache");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function persistPins(nextPins: FishingPin[]) {
     setPins(nextPins);
     savePins(nextPins);
+    saveRemotePins(nextPins).catch((error) => {
+      console.error(error);
+      setDatabaseStatus("Supabase sync failed");
+    });
   }
 
   function persistUsers(nextUsers: User[]) {
     setUsers(nextUsers);
     saveUsers(nextUsers);
+    saveRemoteUsers(nextUsers).catch((error) => {
+      console.error(error);
+      setDatabaseStatus("Supabase sync failed");
+    });
   }
 
   function handleLogin(nextUser: User) {
@@ -66,6 +96,10 @@ function App() {
   function handleDeletePin(id: string) {
     const nextPins = pins.filter((pin) => pin.id !== id);
     persistPins(nextPins);
+    deleteRemotePin(id).catch((error) => {
+      console.error(error);
+      setDatabaseStatus("Supabase sync failed");
+    });
     setSelectedPinId(nextPins[0]?.id ?? null);
   }
 
@@ -86,6 +120,7 @@ function App() {
             <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>Admin</button>
           )}
           <span className="user-pill">{user.role === "admin" ? "Admin" : "User"}: {user.name}</span>
+          <span className="user-pill">{databaseStatus}</span>
           <button onClick={handleLogout}>Log out</button>
         </nav>
       </header>
@@ -96,6 +131,12 @@ function App() {
           users={users}
           currentUser={user}
           onDeletePin={handleDeletePin}
+          onDeleteUser={(email) => {
+            deleteRemoteUser(email).catch((error) => {
+              console.error(error);
+              setDatabaseStatus("Supabase sync failed");
+            });
+          }}
           onUserChange={handleLogin}
           onUsersChange={persistUsers}
         />
@@ -531,6 +572,7 @@ function AdminPanel({
   pins,
   users,
   onDeletePin,
+  onDeleteUser,
   onUserChange,
   onUsersChange,
 }: {
@@ -538,6 +580,7 @@ function AdminPanel({
   pins: FishingPin[];
   users: User[];
   onDeletePin: (id: string) => void;
+  onDeleteUser: (email: string) => void;
   onUserChange: (user: User) => void;
   onUsersChange: (users: User[]) => void;
 }) {
@@ -569,6 +612,7 @@ function AdminPanel({
   function removeUser(target: User) {
     if (target.email === currentUser.email) return;
     onUsersChange(users.filter((user) => user.email !== target.email));
+    onDeleteUser(target.email);
   }
 
   const latest = [...pins].sort((a, b) => b.caughtAt.localeCompare(a.caughtAt))[0];
