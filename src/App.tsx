@@ -275,8 +275,6 @@ function MapDashboard({
 
   return (
     <main className={`map-workspace ${selectedPin ? "panel-open" : ""}`}>
-      <SpotDrawer pin={selectedPin} user={user} onClose={() => onSelectPin("")} onUpdatePin={onUpdatePin} />
-
       <section className="map-section full-map" aria-label="NCR fishing map">
         <div className="map-toolbar">
           <div>
@@ -297,6 +295,8 @@ function MapDashboard({
           onSelectPin={onSelectPin}
         />
       </section>
+
+      <SpotDrawer pin={selectedPin} user={user} onClose={() => onSelectPin("")} onUpdatePin={onUpdatePin} />
 
       <aside className="right-tools">
         <PinForm draftLocation={draftLocation} user={user} onAddPin={onAddPin} />
