@@ -4,7 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { demoAdmin, signIn } from "./auth";
 import { deleteRemotePin, deleteRemoteUser, loadAppData, saveRemotePins, saveRemoteUsers } from "./database";
 import { loadPins, loadSession, loadUsers, savePins, saveSession, saveUsers } from "./storage";
-import { isSupabaseConfigured } from "./supabaseClient";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import type { Comment, FishingPin, PinPhoto, Rating, User } from "./types";
 
 const ncrCities = ["Ottawa", "Gatineau", "Orleans", "Kanata", "Nepean", "Chelsea", "Aylmer"];
@@ -21,6 +21,19 @@ function getRatingColor(value: number) {
   const clamped = Math.max(0, Math.min(5, value));
   const hue = Math.round((clamped / 5) * 120);
   return `hsl(${hue} 78% 43%)`;
+}
+
+function userFromGoogleAuth(authUser: { id: string; email?: string; user_metadata?: { full_name?: string; name?: string } }): User | null {
+  if (!authUser.email) return null;
+  return {
+    id: authUser.id,
+    name: authUser.user_metadata?.full_name ?? authUser.user_metadata?.name ?? authUser.email.split("@")[0] ?? "Angler",
+    email: authUser.email.toLowerCase(),
+    role: "user",
+    githubConnected: false,
+    status: "active",
+    joinedAt: new Date().toISOString().slice(0, 10),
+  };
 }
 
 function App() {
@@ -51,6 +64,22 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      const googleUser = data.session?.user ? userFromGoogleAuth(data.session.user) : null;
+      if (googleUser) handleLogin(googleUser);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const googleUser = session?.user ? userFromGoogleAuth(session.user) : null;
+      if (googleUser) handleLogin(googleUser);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, [users]);
+
   function persistPins(nextPins: FishingPin[]) {
     setPins(nextPins);
     savePins(nextPins);
@@ -77,6 +106,7 @@ function App() {
   }
 
   function handleLogout() {
+    supabase?.auth.signOut();
     setUser(null);
     saveSession(null);
     setView("map");
@@ -170,11 +200,30 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
     }
   }
 
+  async function signInWithGoogle() {
+    if (!supabase) {
+      setError("Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.");
+      return;
+    }
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (oauthError) setError(oauthError.message);
+  }
+
   return (
     <main className="login-page">
       <section className="login-panel">
         <p className="eyebrow">Private NCR fishing log</p>
         <h1>Sign in to explore the NCR map</h1>
+        <button className="google-button" onClick={signInWithGoogle} type="button">
+          <span className="google-mark">G</span>
+          Continue with Gmail
+        </button>
+        <div className="login-divider"><span>or</span></div>
         <form onSubmit={submit} className="auth-form">
           <label>
             Email
