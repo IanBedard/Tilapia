@@ -395,8 +395,8 @@ function OpenFreeMapView({
     if (!draftLocation) return;
 
     const element = document.createElement("div");
-    element.className = "draft-pin real-draft-pin";
-    element.textContent = "New";
+    element.className = "map-pin draft-map-pin";
+    element.innerHTML = "<span></span>";
     draftMarkerRef.current = new maplibregl.Marker({ element, anchor: "bottom" })
       .setLngLat([draftLocation.longitude, draftLocation.latitude])
       .addTo(map);

@@ -476,6 +476,18 @@ textarea {
   transform: none;
 }
 
+.draft-map-pin {
+  background: transparent;
+  border: 0;
+  height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.draft-map-pin span {
+  background: var(--primary);
+}
+
 .right-tools {
   display: grid;
   gap: 16px;
