@@ -189,15 +189,96 @@ function App() {
 function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [localCode, setLocalCode] = useState("");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setError("");
+    setMessage("");
     try {
       onLogin(signIn(email, password));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
     }
+  }
+
+  async function requestVerificationCode() {
+    setError("");
+    setMessage("");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || password.length < 6) {
+      setError("Enter an email and a password with at least 6 characters first.");
+      return;
+    }
+
+    if (supabase) {
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      if (signUpError) {
+        setError(signUpError.message);
+        return;
+      }
+      setMessage("Check your email for the Supabase verification code, then enter it here.");
+      return;
+    }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setLocalCode(code);
+    setMessage(`Development verification code: ${code}`);
+  }
+
+  async function createAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || password.length < 6 || verificationCode.trim().length < 6) {
+      setError("Enter your email, password, and 6-digit verification code.");
+      return;
+    }
+
+    if (supabase) {
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        email: normalizedEmail,
+        token: verificationCode.trim(),
+        type: "signup",
+      });
+      if (verifyError) {
+        setError(verifyError.message);
+        return;
+      }
+      const verifiedUser = data.user ? userFromGoogleAuth(data.user) : null;
+      if (verifiedUser) {
+        onLogin(verifiedUser);
+        return;
+      }
+    }
+
+    if (!localCode || verificationCode.trim() !== localCode) {
+      setError("That verification code does not match.");
+      return;
+    }
+
+    onLogin({
+      id: normalizedEmail,
+      name: normalizedEmail.split("@")[0] || "Angler",
+      email: normalizedEmail,
+      role: "user",
+      githubConnected: false,
+      status: "active",
+      joinedAt: new Date().toISOString().slice(0, 10),
+    });
   }
 
   async function signInWithGoogle() {
@@ -224,17 +305,36 @@ function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
           Continue with Gmail
         </button>
         <div className="login-divider"><span>or</span></div>
-        <form onSubmit={submit} className="auth-form">
+        <div className="auth-tabs" aria-label="Authentication mode">
+          <button className={mode === "signin" ? "active" : ""} onClick={() => setMode("signin")} type="button">Sign in</button>
+          <button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")} type="button">Create account</button>
+        </div>
+        <form onSubmit={mode === "signin" ? submit : createAccount} className="auth-form">
           <label>
             Email
             <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@example.com" />
           </label>
           <label>
             Password
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="At least 4 characters" />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder={mode === "signup" ? "At least 6 characters" : "At least 4 characters"} />
           </label>
+          {mode === "signup" && (
+            <>
+              <button className="secondary-button" onClick={requestVerificationCode} type="button">Send verification code</button>
+              <label>
+                Verification code
+                <input
+                  inputMode="numeric"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value)}
+                  placeholder="6-digit code"
+                />
+              </label>
+            </>
+          )}
+          {message && <p className="form-message">{message}</p>}
           {error && <p className="form-error">{error}</p>}
-          <button type="submit" className="primary-button">Sign in</button>
+          <button type="submit" className="primary-button">{mode === "signin" ? "Sign in" : "Create account"}</button>
         </form>
         <div className="demo-box">
           <strong>Admin demo</strong>
