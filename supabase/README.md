@@ -14,3 +14,12 @@ The app stores users in `app_users` and fishing spots in `fishing_pins`.
 Ratings, comments, and image gallery entries are stored as JSON on each pin for this starter version.
 
 The current RLS policies are intentionally open for prototype development. Tighten them before production.
+
+## Netlify Environment Variables
+
+When hosting on Netlify, add these in Site configuration > Environment variables:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+Do not commit real Supabase keys to the repository.
