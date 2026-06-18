@@ -25,6 +25,8 @@ const seedPins: FishingPin[] = [
     caughtAt: "2026-06-12",
     x: 47,
     y: 58,
+    longitude: -75.7024,
+    latitude: 45.3958,
     createdBy: "system",
     ratings: [
       { id: "rating-dow-1", userEmail: "system", value: 4 },
@@ -56,6 +58,8 @@ const seedPins: FishingPin[] = [
     caughtAt: "2026-06-08",
     x: 70,
     y: 38,
+    longitude: -75.4938,
+    latitude: 45.5067,
     createdBy: "system",
     ratings: [{ id: "rating-petrie-1", userEmail: "system", value: 3 }],
     comments: [
@@ -84,6 +88,8 @@ const seedPins: FishingPin[] = [
     caughtAt: "2026-05-29",
     x: 28,
     y: 35,
+    longitude: -75.8429,
+    latitude: 45.3971,
     createdBy: "system",
     ratings: [{ id: "rating-aylmer-1", userEmail: "system", value: 2 }],
     comments: [],
@@ -98,8 +104,12 @@ const seedPins: FishingPin[] = [
 ];
 
 function normalizePin(pin: FishingPin): FishingPin {
+  const longitude = pin.longitude ?? -75.7 + ((pin.x ?? 50) - 50) * 0.01;
+  const latitude = pin.latitude ?? 45.42 - ((pin.y ?? 50) - 50) * 0.006;
   return {
     ...pin,
+    longitude,
+    latitude,
     ratings: pin.ratings ?? [],
     comments: pin.comments ?? [],
     photos: pin.photos ?? [],

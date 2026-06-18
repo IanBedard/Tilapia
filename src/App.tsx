@@ -1,9 +1,14 @@
-import { FormEvent, MouseEvent, PointerEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import maplibregl, { Map, Marker } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { demoAdmin, signIn } from "./auth";
 import { loadPins, loadSession, loadUsers, savePins, saveSession, saveUsers } from "./storage";
 import type { Comment, FishingPin, PinPhoto, Rating, User } from "./types";
 
 const ncrCities = ["Ottawa", "Gatineau", "Orleans", "Kanata", "Nepean", "Chelsea", "Aylmer"];
+const ncrCenter: [number, number] = [-75.6972, 45.4215];
+const openFreeMapStyle = "https://tiles.openfreemap.org/styles/liberty";
+type DraftLocation = { longitude: number; latitude: number };
 
 function getAverageRating(pin: FishingPin) {
   if (!pin.ratings.length) return 0;
@@ -21,7 +26,7 @@ function App() {
   const [users, setUsers] = useState<User[]>(() => loadUsers());
   const [pins, setPins] = useState<FishingPin[]>(() => loadPins());
   const [selectedPinId, setSelectedPinId] = useState<string | null>(pins[0]?.id ?? null);
-  const [draftLocation, setDraftLocation] = useState<{ x: number; y: number } | null>(null);
+  const [draftLocation, setDraftLocation] = useState<DraftLocation | null>(null);
   const [view, setView] = useState<"map" | "admin">("map");
 
   function persistPins(nextPins: FishingPin[]) {
@@ -160,19 +165,16 @@ function MapDashboard({
   onSelectPin,
   onUpdatePin,
 }: {
-  draftLocation: { x: number; y: number } | null;
+  draftLocation: DraftLocation | null;
   pins: FishingPin[];
   selectedPinId: string | null;
   user: User;
   onAddPin: (pin: FishingPin) => void;
-  onDraftLocation: (location: { x: number; y: number } | null) => void;
+  onDraftLocation: (location: DraftLocation | null) => void;
   onSelectPin: (id: string) => void;
   onUpdatePin: (pin: FishingPin) => void;
 }) {
   const selectedPin = pins.find((pin) => pin.id === selectedPinId) ?? null;
-  const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
-  const movedRef = useRef(false);
 
   const cityCounts = useMemo(() => {
     return ncrCities.map((city) => ({
@@ -180,37 +182,6 @@ function MapDashboard({
       count: pins.filter((pin) => pin.city === city).length,
     }));
   }, [pins]);
-
-  function startDrag(event: PointerEvent<HTMLDivElement>) {
-    dragRef.current = { x: event.clientX, y: event.clientY, originX: mapOffset.x, originY: mapOffset.y };
-    movedRef.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function moveMap(event: PointerEvent<HTMLDivElement>) {
-    if (!dragRef.current) return;
-    const dx = event.clientX - dragRef.current.x;
-    const dy = event.clientY - dragRef.current.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) movedRef.current = true;
-    setMapOffset({
-      x: Math.max(-160, Math.min(160, dragRef.current.originX + dx)),
-      y: Math.max(-110, Math.min(110, dragRef.current.originY + dy)),
-    });
-  }
-
-  function stopDrag() {
-    dragRef.current = null;
-  }
-
-  function dropDraftPin(event: MouseEvent<HTMLDivElement>) {
-    if (movedRef.current) return;
-    const target = event.target as HTMLElement;
-    if (target.closest("button")) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - rect.left - mapOffset.x) / rect.width) * 100;
-    const y = ((event.clientY - rect.top - mapOffset.y) / rect.height) * 100;
-    onDraftLocation({ x: Math.max(4, Math.min(96, x)), y: Math.max(8, Math.min(92, y)) });
-  }
 
   return (
     <main className={`map-workspace ${selectedPin ? "panel-open" : ""}`}>
@@ -220,7 +191,7 @@ function MapDashboard({
         <div className="map-toolbar">
           <div>
             <p className="eyebrow">National Capital Region</p>
-            <h2>Drag the map, click to place a pin</h2>
+            <h2>OpenFreeMap NCR fishing map</h2>
           </div>
           <div className="rating-key">
             <span className="key red" /> 0
@@ -228,42 +199,13 @@ function MapDashboard({
             <span className="key green" /> 5
           </div>
         </div>
-        <div
-          className="ncr-map movable"
-          onClick={dropDraftPin}
-          onPointerDown={startDrag}
-          onPointerMove={moveMap}
-          onPointerUp={stopDrag}
-          onPointerCancel={stopDrag}
-        >
-          <div className="map-canvas" style={{ transform: `translate(${mapOffset.x}px, ${mapOffset.y}px)` }}>
-            <div className="river river-ottawa" />
-            <div className="river river-rideau" />
-            <span className="map-label ottawa">Ottawa</span>
-            <span className="map-label gatineau">Gatineau</span>
-            <span className="map-label kanata">Kanata</span>
-            <span className="map-label orleans">Orleans</span>
-            {pins.map((pin) => {
-              const average = getAverageRating(pin);
-              return (
-                <button
-                  key={pin.id}
-                  className={`map-pin ${pin.id === selectedPin?.id ? "selected" : ""}`}
-                  style={{ left: `${pin.x}%`, top: `${pin.y}%`, ["--pin-color" as string]: getRatingColor(average) }}
-                  onClick={() => onSelectPin(pin.id)}
-                  title={`${pin.spotName}: ${average.toFixed(1)} stars`}
-                >
-                  <span />
-                </button>
-              );
-            })}
-            {draftLocation && (
-              <div className="draft-pin" style={{ left: `${draftLocation.x}%`, top: `${draftLocation.y}%` }}>
-                New
-              </div>
-            )}
-          </div>
-        </div>
+        <OpenFreeMapView
+          draftLocation={draftLocation}
+          pins={pins}
+          selectedPinId={selectedPin?.id ?? null}
+          onDraftLocation={onDraftLocation}
+          onSelectPin={onSelectPin}
+        />
       </section>
 
       <aside className="right-tools">
@@ -279,6 +221,102 @@ function MapDashboard({
         </section>
       </aside>
     </main>
+  );
+}
+
+function OpenFreeMapView({
+  draftLocation,
+  pins,
+  selectedPinId,
+  onDraftLocation,
+  onSelectPin,
+}: {
+  draftLocation: DraftLocation | null;
+  pins: FishingPin[];
+  selectedPinId: string | null;
+  onDraftLocation: (location: DraftLocation | null) => void;
+  onSelectPin: (id: string) => void;
+}) {
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<Map | null>(null);
+  const markersRef = useRef<Marker[]>([]);
+  const draftMarkerRef = useRef<Marker | null>(null);
+
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: openFreeMapStyle,
+      center: ncrCenter,
+      zoom: 9.2,
+      maxBounds: [
+        [-76.25, 45.12],
+        [-75.15, 45.72],
+      ],
+    });
+
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+    map.on("click", (event) => {
+      onDraftLocation({ longitude: event.lngLat.lng, latitude: event.lngLat.lat });
+    });
+
+    mapRef.current = map;
+
+    return () => {
+      markersRef.current.forEach((marker) => marker.remove());
+      draftMarkerRef.current?.remove();
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [onDraftLocation]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = pins.map((pin) => {
+      const average = getAverageRating(pin);
+      const element = document.createElement("button");
+      element.className = `map-pin real-map-pin ${pin.id === selectedPinId ? "selected" : ""}`;
+      element.style.setProperty("--pin-color", getRatingColor(average));
+      element.title = `${pin.spotName}: ${average.toFixed(1)} stars`;
+      element.type = "button";
+      element.innerHTML = "<span></span>";
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onSelectPin(pin.id);
+        map.flyTo({ center: [pin.longitude, pin.latitude], zoom: Math.max(map.getZoom(), 11), speed: 0.8 });
+      });
+      return new maplibregl.Marker({ element, anchor: "bottom" })
+        .setLngLat([pin.longitude, pin.latitude])
+        .addTo(map);
+    });
+  }, [onSelectPin, pins, selectedPinId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    draftMarkerRef.current?.remove();
+    draftMarkerRef.current = null;
+    if (!draftLocation) return;
+
+    const element = document.createElement("div");
+    element.className = "draft-pin real-draft-pin";
+    element.textContent = "New";
+    draftMarkerRef.current = new maplibregl.Marker({ element, anchor: "bottom" })
+      .setLngLat([draftLocation.longitude, draftLocation.latitude])
+      .addTo(map);
+  }, [draftLocation]);
+
+  return (
+    <div className="openfreemap-shell">
+      <div ref={mapContainerRef} className="openfreemap-map" />
+      <div className="map-help">Pan and zoom the NCR. Click the map to choose where the next observation pin will drop.</div>
+    </div>
   );
 }
 
@@ -386,7 +424,7 @@ function PinForm({
   user,
   onAddPin,
 }: {
-  draftLocation: { x: number; y: number } | null;
+  draftLocation: DraftLocation | null;
   user: User;
   onAddPin: (pin: FishingPin) => void;
 }) {
@@ -411,8 +449,10 @@ function PinForm({
       fishCaught,
       notes,
       caughtAt,
-      x: draftLocation?.x ?? 50,
-      y: draftLocation?.y ?? 50,
+      x: 50,
+      y: 50,
+      longitude: draftLocation?.longitude ?? ncrCenter[0],
+      latitude: draftLocation?.latitude ?? ncrCenter[1],
       createdBy: user.email,
       ratings: [{ id: crypto.randomUUID(), userEmail: user.email, value: Number(rating) }],
       comments: notes ? [{ id: crypto.randomUUID(), author: user.email, body: notes, createdAt: caughtAt }] : [],

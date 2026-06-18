@@ -224,6 +224,33 @@ textarea {
   min-width: 0;
 }
 
+.openfreemap-shell {
+  min-height: 620px;
+  position: relative;
+}
+
+.openfreemap-map {
+  height: 620px;
+  width: 100%;
+}
+
+.map-help {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #d4e3dc;
+  border-radius: 999px;
+  bottom: 14px;
+  color: #35564d;
+  font-size: 0.86rem;
+  font-weight: 800;
+  left: 50%;
+  max-width: calc(100% - 28px);
+  padding: 9px 14px;
+  position: absolute;
+  text-align: center;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
 .ncr-map {
   aspect-ratio: 16 / 10;
   background:
@@ -315,6 +342,16 @@ textarea {
   transform: rotate(-45deg) scale(1.18);
 }
 
+.real-map-pin {
+  background: transparent;
+  border: 0;
+}
+
+.real-map-pin.maplibregl-marker {
+  height: 34px;
+  width: 34px;
+}
+
 .draft-pin {
   background: #153f34;
   border: 2px solid #fff;
@@ -326,6 +363,11 @@ textarea {
   position: absolute;
   transform: translate(-50%, -50%);
   z-index: 4;
+}
+
+.real-draft-pin {
+  position: static;
+  transform: none;
 }
 
 .right-tools {

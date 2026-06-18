@@ -39,6 +39,8 @@ export type FishingPin = {
   caughtAt: string;
   x: number;
   y: number;
+  longitude: number;
+  latitude: number;
   createdBy: string;
   ratings: Rating[];
   comments: Comment[];
